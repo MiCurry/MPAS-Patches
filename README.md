@@ -10,3 +10,4 @@ Collection' to be used for creating MPL visualizations.
 2. Create a command-line interface
 3. Experiment with Multi Processing
 4. Create a tutorial for both command line and using it as an import
+5. Create a requirments.txt file
