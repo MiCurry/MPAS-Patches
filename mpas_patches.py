@@ -32,7 +32,18 @@ def update_progress(job_title, progress):
     sys.stdout.write(msg)
     sys.stdout.flush()
 
-def get_mpas_patches(mesh, pickle=True, pickleFile=None):
+def generate_mesh_patch_fname(mesh):
+    ''' Generate the default mesh patch filename. eg: x1.10242.patches. '''
+    nCells = len(mesh.dimensions['nCells'])
+    mesh_patches_fname = mesh.config_block_decomp_file_prefix.split('/')[-1]
+    mesh_patches_fname = mesh_patches_fname.split('.')[0]
+    mesh_patches_fname = mesh_patches_fname+'.'+str(nCells)+'.'+'patches'
+    return mesh_patches_fname
+
+def get_mpas_patches(mesh, pickle=True, pickleFile=None, **kwargs):
+
+    force = kwargs.get('force', False)
+
     nCells = len(mesh.dimensions['nCells'])
     nEdgesOnCell = mesh.variables['nEdgesOnCell']
     verticesOnCell = mesh.variables['verticesOnCell']
@@ -44,13 +55,12 @@ def get_mpas_patches(mesh, pickle=True, pickleFile=None):
     if pickleFile:
         pickle_fname = pickleFile
     else:
-        pickle_fname = mesh.config_block_decomp_file_prefix.split('/')[-1]
-        pickle_fname = pickle_fname.split('.')[0]
-        pickle_fname = pickle_fname+'.'+str(nCells)+'.'+'patches'
+        pickle_fname = generate_mesh_patch_fname(mesh)
 
-    print(pickle_fname)
+    print("Creating a patch file: ", pickle_fname)
 
-    if(os.path.isfile(pickle_fname)):
+    # Try to load the pickle file
+    if(os.path.isfile(pickle_fname) and not force):
         pickled_patches = open(pickle_fname,'rb')
         try:
             patch_collection = pkle.load(pickled_patches)
@@ -59,11 +69,16 @@ def get_mpas_patches(mesh, pickle=True, pickleFile=None):
             return patch_collection
         except:
             print("ERROR: Error while trying to read the pickled patches")
-            print("ERROR: The pickle file may be corrupted or was not created")
-            print("ERROR: succesfully!")
+            print("ERROR: The pickle file may be corrupted and was probably not created")
+            print("ERROR: succesfully")
+            print("ERROR: Please delete it and try again")
             sys.exit(-1)
 
-    print("\nNo pickle file found, creating patches...")
+    if force:
+        print("\nForce flag set to True, overwriting pickle file if it exists...")
+    else:
+        print("\nNo pickle file found, creating patches...")
+
     print("If this is a large mesh, then this proccess will take a while...")
 
     for cell in range(len(mesh.dimensions['nCells'])):
@@ -115,3 +130,61 @@ def get_mpas_patches(mesh, pickle=True, pickleFile=None):
     print("\nCreated a patch file for mesh: ", pickle_file)
     return patch_collection
 
+
+if __name__ == "__main__":
+    import argparse
+    from netCDF4 import Dataset
+
+    description = """ Create a MatPltLib Patch Collection of an MPAS-A Mesh and
+    save it as a Pickle File.
+
+    Multi-threaded currently not available.
+    """
+
+    parser = argparse.ArgumentParser(description=description)
+    
+    parser.add_argument('mesh',
+                        help='Path to NetCDF MPAS Mesh',
+                        type=str) 
+    parser.add_argument('-o', '--output',
+                        help='Location and name of the output file',
+                        type=str,
+                        default=None) 
+    parser.add_argument('-n', '--nThreads',
+                        help='Number of Threads',
+                        type=int,
+                        default=1) 
+    parser.add_argument('-f', '--force',
+                        help='Overwrite existing patch file',
+                        action='store_true',
+                        default=False) 
+
+    args = parser.parse_args()
+
+    force = args.force
+    mesh = args.mesh 
+    output = args.output
+    nThreads = args.nThreads
+
+    if not os.path.isfile(mesh):
+        print("ERROR: ", mesh)
+        print("ERROR: Mesh file was not found")
+        sys.exit(-1)
+
+    # Check to see that the file is a dataset
+    try:
+        mesh = Dataset(mesh)
+    except:
+        print("ERROR: ", mesh)
+        print("ERROR: Was not a valid NetCDF file")
+
+    # See if the specified output file already exists...
+    if not output:
+        output = generate_mesh_patch_fname(mesh)
+
+    # If the patch file exists and force is not specified, exit
+    if os.path.isfile(output) and not force:
+        print("ERROR: '", output, "' patch file already exists")
+        sys.exit(-1)
+
+    get_mpas_patches(mesh, pickleFile=output, force=force)
