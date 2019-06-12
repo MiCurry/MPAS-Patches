@@ -8,17 +8,21 @@ import matplotlib.collections as mplcollections
 import matplotlib.patches as patches
 import matplotlib.path as path
 
-''' This module creates or retrives a collection of MPL Path Patches for an MPAS unstructured mesh.
+from netCDF4 import Dataset
 
-Given an MPAS mesh file, `get_mpas_patches` will create a Path Patch for each MPAS grid, by looping
-over a Cell's vertices. Because this operation is a nCell * nEdge operation, it will take some
-quite some time.
+''' This module creates or retrives a collection of MPL Path Patches for an
+MPAS unstructured mesh.
 
-However, once a patch collection is created it is saved (using Python's Pickle module) as a 'patch'
-file. This patch file can be loaded for furture plots on that mesh, which will speed up future
-plots creation.
+Given an MPAS mesh file, `get_mpas_patches` will create a Path Patch for each
+MPAS grid, by looping over a Cell's vertices. Because this operation is a nCell
+* nEdge operation, it will take some quite some time.
 
-This module was created with much help and guidence from the following repository:
+However, once a patch collection is created it is saved (using Python's Pickle
+module) as a 'patch' file. This patch file can be loaded for furture plots on
+that mesh, which will speed up future plots creation.
+
+This module was created with much help and guidence from the following
+repository:
 
 * https://github.com/lmadaus/mpas_python
 
@@ -35,22 +39,19 @@ def update_progress(job_title, progress):
 def generate_mesh_patch_fname(mesh):
     ''' Generate the default mesh patch filename. eg: x1.10242.patches. '''
     nCells = len(mesh.dimensions['nCells'])
-    mesh_patches_fname = mesh.config_block_decomp_file_prefix.split('/')[-1]
-    mesh_patches_fname = mesh_patches_fname.split('.')[0]
-    mesh_patches_fname = mesh_patches_fname+'.'+str(nCells)+'.'+'patches'
+    mesh_patches_fname = str(nCells)+'.'+'patches'
     return mesh_patches_fname
 
 def get_mpas_patches(mesh, pickle=True, pickleFile=None, **kwargs):
 
     force = kwargs.get('force', False)
 
-    nCells = len(mesh.dimensions['nCells'])
-    nEdgesOnCell = mesh.variables['nEdgesOnCell']
-    verticesOnCell = mesh.variables['verticesOnCell']
-    latVertex = mesh.variables['latVertex']
-    lonVertex = mesh.variables['lonVertex']
-
-    mesh_patches = [None] * nCells
+    nCells = mesh.dimensions['nCells'].size
+    maxEdges = mesh.dimensions['maxEdges'].size
+    verticesOnCell = mesh.variables['verticesOnCell'][:]
+    nEdgesOnCell = mesh.variables['nEdgesOnCell'][:]
+    latVertex = mesh.variables['latVertex'][:]
+    lonVertex = mesh.variables['lonVertex'][:]
 
     if pickleFile:
         pickle_fname = pickleFile
@@ -81,59 +82,56 @@ def get_mpas_patches(mesh, pickle=True, pickleFile=None, **kwargs):
 
     print("If this is a large mesh, then this proccess will take a while...")
 
-    for cell in range(len(mesh.dimensions['nCells'])):
-        # For each cell, get the latitude and longitude points of its vertices
-        # and make a patch of that point vertices
-        vertices = verticesOnCell[cell,:nEdgesOnCell[cell]]
-        vertices = np.append(vertices, vertices[0:1])
+    mesh_patches = [None] * nCells
 
-        vertices -= 1
+    # make a patch for each vertex
+    vertices = verticesOnCell[:,:]
+    latVertex = latVertex[vertices - 1]
+    lonVertex = lonVertex[vertices - 1]
+    del(vertices)
+    del(verticesOnCell)
 
-        vert_lats = np.array([])
-        vert_lons = np.array([])
+    # Normalize latitude and longitude
+    lonVertex *= (180.0/np.pi)
+    latVertex *= (180.0/np.pi)
 
-        for lat in mesh.variables['latVertex'][vertices]:
-            vert_lats = np.append(vert_lats, lat * (180 / np.pi)) 
+    lonVertex[lonVertex > 180.0] -= 360.
+    lonVertex[lonVertex < -180.0] -= 360.
 
-        for lon in mesh.variables['lonVertex'][vertices]:
-            vert_lons = np.append(vert_lons, lon * (180 / np.pi))
+    llVertexOnCell = np.stack((lonVertex, latVertex))
+    del(lonVertex)
+    del(latVertex)
 
-        # Normalize latitude and longitude
-        diff = np.subtract(vert_lons, vert_lons[0])
-        vert_lons[diff > 180.0] = vert_lons[diff > 180.] - 360.
-        vert_lons[diff < -180.0] = vert_lons[diff < -180.] + 360.
+    llVertexOnCell = np.moveaxis(llVertexOnCell, 0, 1)
+    llVertexOnCell = np.moveaxis(llVertexOnCell, 1, 2)
 
-        coords = np.vstack((vert_lons, vert_lats)) 
+    for i in range(llVertexOnCell.shape[0]):
+        cell_patch = path.Path(llVertexOnCell[i,0:nEdgesOnCell[i]+1,:],
+                                 closed=True,
+                                 readonly=True)
+        mesh_patches[i] = patches.PathPatch(cell_patch)
+        update_progress("Creating Patch file: "+pickle_fname, i/nCells)
 
-        cell_path = np.ones(vertices.shape) * path.Path.LINETO
-        cell_path[0] = path.Path.MOVETO
-        cell_path[-1] = path.Path.CLOSEPOLY
-        cell_patch = path.Path(coords.T, 
-                               codes=cell_path, 
-                               closed=True,
-                               readonly=True)
-                               
-        mesh_patches[cell] = patches.PathPatch(cell_patch)
-                                               
-        update_progress("Creating Patch file: "+pickle_fname, cell/nCells)
-            
     print("\n")
 
     # Create patch collection
     patch_collection = mplcollections.PatchCollection(mesh_patches)
 
     # Pickle the patch collection
-    pickle_file = open(pickle_fname, 'wb')
-    pkle.dump(patch_collection, pickle_file)
-    pickle_file.close()
+    if pickle:
+        pickle_file = open(pickle_fname, 'wb')
+        pkle.dump(patch_collection, pickle_file)
+        pickle_file.close()
+        print("\nCreated a patch file for mesh: ", pickle_fname)
+    else:
+        print("\nPatch Collection created, but was not saved")
+        print("Enable Pickling by calling this function with pickle=True")
 
-    print("\nCreated a patch file for mesh: ", pickle_file)
     return patch_collection
 
 
 if __name__ == "__main__":
     import argparse
-    from netCDF4 import Dataset
 
     description = """ Create a MatPltLib Patch Collection of an MPAS-A Mesh and
     save it as a Pickle File.
