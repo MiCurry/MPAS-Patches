@@ -95,8 +95,6 @@ def get_mpas_patches(mesh, pickle=True, pickleFile=None, **kwargs):
     lonVertex *= (180.0/np.pi)
     latVertex *= (180.0/np.pi)
 
-    lonVertex[lonVertex > 180.0] -= 360.
-    lonVertex[lonVertex < -180.0] -= 360.
 
     llVertexOnCell = np.stack((lonVertex, latVertex))
     del(lonVertex)
@@ -105,12 +103,18 @@ def get_mpas_patches(mesh, pickle=True, pickleFile=None, **kwargs):
     llVertexOnCell = np.moveaxis(llVertexOnCell, 0, 1)
     llVertexOnCell = np.moveaxis(llVertexOnCell, 1, 2)
 
+
     for i in range(llVertexOnCell.shape[0]):
+        diff = np.subtract(llVertexOnCell[i,:,0], llVertexOnCell[i,0,0])
+        llVertexOnCell[i,diff > 180.0,0] -= 360
+        llVertexOnCell[i,diff < -180.0,0] += 360
+
         cell_patch = path.Path(llVertexOnCell[i,0:nEdgesOnCell[i]+1,:],
                                  closed=True,
                                  readonly=True)
         mesh_patches[i] = patches.PathPatch(cell_patch)
-        update_progress("Creating Patch file: "+pickle_fname, i/nCells)
+        if i % 250 == 0:
+            update_progress("Creating Patch file: "+pickle_fname, i/nCells)
 
     print("\n")
 
