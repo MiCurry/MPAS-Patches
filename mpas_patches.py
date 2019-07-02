@@ -53,6 +53,8 @@ def get_mpas_patches(mesh, pickle=True, pickleFile=None, **kwargs):
     latVertex = mesh.variables['latVertex'][:]
     lonVertex = mesh.variables['lonVertex'][:]
 
+    progress = int(nCells * 0.01)
+
     if pickleFile:
         pickle_fname = pickleFile
     else:
@@ -113,7 +115,7 @@ def get_mpas_patches(mesh, pickle=True, pickleFile=None, **kwargs):
                                  closed=True,
                                  readonly=True)
         mesh_patches[i] = patches.PathPatch(cell_patch)
-        if i % 250 == 0:
+        if i % progress == 0:
             update_progress("Creating Patch file: "+pickle_fname, i/nCells)
 
     print("\n")
